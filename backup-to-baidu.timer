@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily backup to Baidu Pan
+
+[Timer]
+OnCalendar=*-*-* 02:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+

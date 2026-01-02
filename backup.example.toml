@@ -1,0 +1,17 @@
+[app]
+app_key = "your_app_key"
+app_secret = "your_app_secret"
+# Optional: where to store the Baidu token cache file
+# baidu_config = "C:/path/to/baidu_pan_config.json"
+
+[[backups]]
+source_dir = "D:/data/project-a"
+remote_dir = "/backups/project-a"
+archive_name = "project-a"
+keep_archive = false
+
+[[backups]]
+source_dir = "D:/data/project-b"
+remote_dir = "/backups/project-b"
+archive_name = "project-b"
+keep_archive = true
