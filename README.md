@@ -1,11 +1,12 @@
 # backup-to-baidu
 
-A general-purpose backup tool that packages directories into a dated `tar.zst`
-archive and uploads to Baidu Pan. It supports multiple backup targets defined in
-a TOML config file.
+A general-purpose backup tool that packages directories or files into a dated
+`tar.zst` archive and uploads to Baidu Pan. It supports multiple backup targets
+defined in a TOML config file.
 
 ## Features
-- Package a directory into `tar.zst` (zstd high compression)
+- Package a directory or file into `tar.zst` (zstd high compression)
+- Optional: run a command to generate a file, then archive it
 - Append date to archive name
 - Upload to Baidu Pan with automatic token caching/refresh
 - Multiple backup entries in one config
@@ -29,10 +30,23 @@ source_dir = "D:/data/project-a"
 remote_dir = "/backups/project-a"
 archive_name = "project-a"
 keep_archive = false
+
+[[backups]]
+command = "mysqldump -u root -pYourPass mydb > D:/backup/mysql/mydb.sql"
+source_path = "D:/backup/mysql/mydb.sql"
+keep_command_source = false
+remote_dir = "/backups/mysql"
+archive_name = "mydb"
+keep_archive = false
 ```
 
 - `archive_name` becomes `archive_name-YYYYMMDD.tar.zst`
 - `keep_archive` defaults to `false`
+- `source_path` can be a file or directory; `source_dir` is kept for compatibility
+- `command` runs in the system shell (`cmd /C` on Windows, `sh -c` on Unix)
+- `command_workdir` sets the working directory for `command`
+- `keep_command_source` defaults to `true` and only applies when `command` is set
+- Normal file/directory backups never modify the source data
 
 ## Run
 ```bash

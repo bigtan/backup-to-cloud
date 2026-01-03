@@ -15,3 +15,12 @@ source_dir = "D:/data/project-b"
 remote_dir = "/backups/project-b"
 archive_name = "project-b"
 keep_archive = true
+
+[[backups]]
+# Run a command to generate a file, then archive the output file.
+command = "mysqldump -u root -pYourPass mydb > D:/backup/mysql/mydb.sql"
+source_path = "D:/backup/mysql/mydb.sql"
+keep_command_source = false
+remote_dir = "/backups/mysql"
+archive_name = "mydb"
+keep_archive = false

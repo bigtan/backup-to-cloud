@@ -6,6 +6,7 @@ use chrono::Local;
 use std::env;
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use tracing::info;
 use serde::Deserialize;
 
@@ -24,7 +25,11 @@ struct AppConfig {
 
 #[derive(Debug, Deserialize)]
 struct BackupItem {
-    source_dir: String,
+    source_dir: Option<String>,
+    source_path: Option<String>,
+    command: Option<String>,
+    command_workdir: Option<String>,
+    keep_command_source: Option<bool>,
     remote_dir: String,
     archive_name: String,
     keep_archive: Option<bool>,
@@ -46,17 +51,22 @@ fn main() -> Result<()> {
         BaiduPanUploader::new(config.app.app_key, config.app.app_secret, baidu_config)?;
 
     for item in config.backups {
-        let source_path = Path::new(&item.source_dir);
-        if !source_path.is_dir() {
-            anyhow::bail!(
-                "Source directory not found or not a directory: {}",
-                item.source_dir
-            );
+        let source_path = resolve_source_path(&item)?;
+        if let Some(command) = item.command.as_deref() {
+            info!("Running command: {}", command);
+            run_command(command, item.command_workdir.as_deref())?;
+        }
+
+        if !source_path.exists() {
+            anyhow::bail!("Source path not found: {}", source_path.display());
+        }
+        if !source_path.is_dir() && !source_path.is_file() {
+            anyhow::bail!("Source path is not a file or directory: {}", source_path.display());
         }
 
         let archive_path = build_archive_path(&item.archive_name)?;
         info!("Creating archive: {}", archive_path.display());
-        create_archive(source_path, &archive_path)?;
+        create_archive(&source_path, &archive_path)?;
 
         uploader.upload(
             archive_path
@@ -71,6 +81,16 @@ fn main() -> Result<()> {
                     archive_path.display()
                 )
             })?;
+        }
+        if item.command.is_some() && !item.keep_command_source.unwrap_or(true) {
+            if source_path.is_file() {
+                fs::remove_file(&source_path).with_context(|| {
+                    format!(
+                        "Failed to remove command output file: {}",
+                        source_path.display()
+                    )
+                })?;
+            }
         }
     }
 
@@ -100,22 +120,71 @@ fn build_archive_path(archive_name: &str) -> Result<PathBuf> {
     Ok(output_path)
 }
 
-fn create_archive(source_dir: &Path, output_path: &Path) -> Result<()> {
+fn resolve_source_path(item: &BackupItem) -> Result<PathBuf> {
+    let candidate = item
+        .source_path
+        .as_deref()
+        .or(item.source_dir.as_deref())
+        .context("Missing source_path/source_dir in backup item")?;
+    let trimmed = candidate.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("source_path/source_dir cannot be empty");
+    }
+    Ok(PathBuf::from(trimmed))
+}
+
+fn run_command(command: &str, workdir: Option<&str>) -> Result<()> {
+    let mut cmd = if cfg!(windows) {
+        let mut command_builder = Command::new("cmd");
+        command_builder.args(["/C", command]);
+        command_builder
+    } else {
+        let mut command_builder = Command::new("sh");
+        command_builder.args(["-c", command]);
+        command_builder
+    };
+
+    if let Some(dir) = workdir {
+        let dir_path = Path::new(dir);
+        if !dir_path.is_dir() {
+            anyhow::bail!("Command workdir is not a directory: {}", dir);
+        }
+        cmd.current_dir(dir_path);
+    }
+
+    let status = cmd
+        .status()
+        .with_context(|| format!("Failed to run command: {}", command))?;
+    if !status.success() {
+        anyhow::bail!("Command failed with exit code: {}", status);
+    }
+    Ok(())
+}
+
+fn create_archive(source_path: &Path, output_path: &Path) -> Result<()> {
     let file = File::create(output_path)
         .with_context(|| format!("Failed to create archive file: {}", output_path.display()))?;
     let encoder = zstd::Encoder::new(file, 19)
         .context("Failed to initialize zstd encoder")?;
     let mut builder = tar::Builder::new(encoder);
 
-    let base_name = source_dir
+    let base_name = source_path
         .file_name()
         .and_then(|name| name.to_str())
         .filter(|name| !name.is_empty())
         .unwrap_or("backup");
 
-    builder
-        .append_dir_all(base_name, source_dir)
-        .with_context(|| format!("Failed to append directory: {}", source_dir.display()))?;
+    if source_path.is_dir() {
+        builder
+            .append_dir_all(base_name, source_path)
+            .with_context(|| format!("Failed to append directory: {}", source_path.display()))?;
+    } else if source_path.is_file() {
+        builder
+            .append_path_with_name(source_path, base_name)
+            .with_context(|| format!("Failed to append file: {}", source_path.display()))?;
+    } else {
+        anyhow::bail!("Source path is not a file or directory: {}", source_path.display());
+    }
     builder.finish().context("Failed to finish tar archive")?;
     let encoder = builder.into_inner().context("Failed to finalize tar builder")?;
     encoder.finish().context("Failed to finish zstd encoding")?;
