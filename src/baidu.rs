@@ -5,11 +5,16 @@ use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::thread::sleep;
+use std::time::Duration as StdDuration;
 use tracing::{debug, info, warn};
 
 const BASE_URL: &str = "https://pan.baidu.com/rest/2.0/xpan/";
 const OAUTH_URL: &str = "https://openapi.baidu.com/oauth/2.0/";
+const PCS_BASE_URL: &str = "https://d.pcs.baidu.com/rest/2.0/pcs/";
 const CHUNK_SIZE: usize = 4 * 1024 * 1024; // 4MB per chunk
+const CHUNK_UPLOAD_MAX_RETRIES: u32 = 3;
+const CHUNK_UPLOAD_BACKOFF_BASE_MS: u64 = 1000;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct TokenData {
@@ -48,6 +53,18 @@ struct CreateResponse {
     errno: i32,
     #[allow(dead_code)]
     fs_id: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LocateUploadServer {
+    server: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct LocateUploadResponse {
+    error_code: i32,
+    error_msg: Option<String>,
+    servers: Option<Vec<LocateUploadServer>>,
 }
 
 /// Baidu Pan uploader with OAuth2 authentication
@@ -287,6 +304,41 @@ impl BaiduPanUploader {
         Ok(user_info)
     }
 
+    /// Get upload server for chunk upload
+    fn get_upload_server(
+        &self,
+        access_token: &str,
+        path: &str,
+        upload_id: &str,
+    ) -> Result<String> {
+        let encoded_path = urlencoding::encode(path);
+        let url = format!(
+            "{}file?method=locateupload&appid=250528&access_token={}&path={}&uploadid={}&upload_version=2.0",
+            PCS_BASE_URL, access_token, encoded_path, upload_id
+        );
+
+        let response = self.client.get(&url).send()?;
+        let locate_result: LocateUploadResponse = response.json()?;
+
+        if locate_result.error_code != 0 {
+            anyhow::bail!(
+                "Failed to locate upload server: {}",
+                locate_result.error_msg.unwrap_or_else(|| "unknown error".to_string())
+            );
+        }
+
+        let servers = locate_result
+            .servers
+            .context("No servers returned by locateupload")?;
+
+        let https_server = servers
+            .into_iter()
+            .find(|s| s.server.starts_with("https://"))
+            .context("No https server found in locateupload response")?;
+
+        Ok(https_server.server)
+    }
+
     /// Calculate MD5 hash of file chunks
     fn calculate_block_list(&self, file_path: &Path) -> Result<Vec<String>> {
         let mut file = File::open(file_path)?;
@@ -357,6 +409,11 @@ impl BaiduPanUploader {
             .context("No upload ID returned")?;
         info!("Pre-upload successful. Upload ID: {}", upload_id);
 
+        // 2.1 Locate upload server
+        debug!("Locating upload server...");
+        let upload_server = self.get_upload_server(&access_token, &remote_full_path, &upload_id)?;
+        info!("Upload server: {}", upload_server);
+
         // 3. Upload chunks
         let mut file = File::open(local_path)?;
         let mut buffer = vec![0u8; CHUNK_SIZE];
@@ -370,18 +427,42 @@ impl BaiduPanUploader {
             }
 
             let upload_url = format!(
-                "https://d.pcs.baidu.com/rest/2.0/pcs/superfile2?method=upload&access_token={}&type=tmpfile&path={}&uploadid={}&partseq={}",
-                access_token, remote_full_path, upload_id, i
+                "{}/rest/2.0/pcs/superfile2?method=upload&access_token={}&type=tmpfile&path={}&uploadid={}&partseq={}",
+                upload_server, access_token, remote_full_path, upload_id, i
             );
 
-            let part = multipart::Part::bytes(buffer[..bytes_read].to_vec())
-                .file_name("file");
-            let form = multipart::Form::new().part("file", part);
-
-            let response = self.client.post(&upload_url).multipart(form).send()?;
-
-            if !response.status().is_success() {
-                anyhow::bail!("Chunk {} upload failed: {}", i, response.status());
+            let mut attempt = 0;
+            loop {
+                attempt += 1;
+                let part = multipart::Part::bytes(buffer[..bytes_read].to_vec())
+                    .file_name("file");
+                let form = multipart::Form::new().part("file", part);
+                let response = self.client.post(&upload_url).multipart(form).send();
+                match response {
+                    Ok(resp) => {
+                        if !resp.status().is_success() {
+                            anyhow::bail!("Chunk {} upload failed: {}", i, resp.status());
+                        }
+                        break;
+                    }
+                    Err(e) => {
+                        let should_retry = e.is_timeout();
+                        if should_retry && attempt <= CHUNK_UPLOAD_MAX_RETRIES {
+                            let backoff_ms =
+                                CHUNK_UPLOAD_BACKOFF_BASE_MS * (1_u64 << (attempt - 1));
+                            warn!(
+                                "Chunk {} upload timed out (attempt {}/{}), retrying after {}ms",
+                                i + 1,
+                                attempt,
+                                CHUNK_UPLOAD_MAX_RETRIES,
+                                backoff_ms
+                            );
+                            sleep(StdDuration::from_millis(backoff_ms));
+                            continue;
+                        }
+                        return Err(e.into());
+                    }
+                }
             }
         }
 
