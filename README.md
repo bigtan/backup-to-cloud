@@ -1,14 +1,16 @@
-# backup-to-baidu
+# backup-to-cloud
 
 A general-purpose backup tool that packages directories or files into a dated
-`tar.zst` archive and uploads to Baidu Pan. It supports multiple backup targets
-defined in a TOML config file.
+`tar.zst` archive and uploads to Baidu Pan and Cloud189. It supports multiple
+backup targets defined in a TOML config file.
 
 ## Features
 - Package a directory or file into `tar.zst` (zstd high compression)
 - Optional: run a command to generate a file, then archive it
 - Append date to archive name
 - Upload to Baidu Pan with automatic token caching/refresh
+- Upload to Cloud189 with session caching
+- Enable either or both clouds per config
 - Multiple backup entries in one config
 - Optional keep-or-delete archive after upload
 
@@ -21,9 +23,15 @@ cargo build --release
 Create `backup.toml` (see `backup.example.toml`):
 ```toml
 [app]
-app_key = "your_app_key"
-app_secret = "your_app_secret"
+# baidu_enabled = true
+baidu_app_key = "your_baidu_app_key"
+baidu_app_secret = "your_baidu_app_secret"
 # baidu_config = "C:/path/to/baidu_pan_config.json"
+# cloud189_enabled = true
+# cloud189_config = "C:/path/to/cloud189/config.json"
+# cloud189_username = "your_cloud189_username"
+# cloud189_password = "your_cloud189_password"
+# cloud189_use_qr = false
 
 [[backups]]
 source_dir = "/srv/data/project-a"
@@ -48,10 +56,13 @@ keep_archive = false
 - `keep_command_source` defaults to `true` and only applies when `command` is set
 - Normal file/directory backups never modify the source data
 - `command`, `command_workdir`, `source_dir`, `source_path`, and `remote_dir` support placeholders: `{date}` and `{archive_name}`
+- Cloud189 credentials can be provided via config or env: `CLOUD189_USERNAME`, `CLOUD189_PASSWORD`, `CLOUD189_USE_QR=1`
+- `baidu_app_key` / `baidu_app_secret` also accept legacy keys `app_key` / `app_secret`
+- `baidu_enabled` / `cloud189_enabled` are optional; if omitted, they auto-enable when related config/env values are present
 
 ## Run
 ```bash
-backup-to-baidu backup.toml
+backup-to-cloud backup.toml
 ```
 
 If no config path is provided, it defaults to `backup.toml` in the current
@@ -59,15 +70,15 @@ directory.
 
 ## systemd (daily at 02:00)
 Edit the placeholders in these files:
-- `backup-to-baidu.service`
-- `backup-to-baidu.timer`
+- `backup-to-cloud.service`
+- `backup-to-cloud.timer`
 
 Install (system scope):
 ```bash
-sudo cp backup-to-baidu.service /etc/systemd/system/
-sudo cp backup-to-baidu.timer /etc/systemd/system/
+sudo cp backup-to-cloud.service /etc/systemd/system/
+sudo cp backup-to-cloud.timer /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now backup-to-baidu.timer
+sudo systemctl enable --now backup-to-cloud.timer
 ```
 
 ## Case: backup for vaultwarden (docker compose, sqlite)

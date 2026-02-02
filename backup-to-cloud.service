@@ -1,0 +1,12 @@
+[Unit]
+Description=Backup to Cloud
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=your_user
+WorkingDirectory=/path/to/backup-to-cloud
+ExecStart=/path/to/backup-to-cloud /path/to/backup.toml
+Restart=no
+

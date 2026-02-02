@@ -1,8 +1,18 @@
 [app]
-app_key = "your_app_key"
-app_secret = "your_app_secret"
+baidu_enabled = true
+baidu_app_key = "your_baidu_app_key"
+baidu_app_secret = "your_baidu_app_secret"
 # Optional: where to store the Baidu token cache file
 # baidu_config = "C:/path/to/baidu_pan_config.json"
+# Enable Cloud189 uploads (backup to two servers)
+# cloud189_enabled = true
+# Optional: where to store the Cloud189 session config file
+# cloud189_config = "C:/path/to/cloud189/config.json"
+# Optional: Cloud189 credentials (or use env CLOUD189_USERNAME/CLOUD189_PASSWORD)
+# cloud189_username = "your_cloud189_username"
+# cloud189_password = "your_cloud189_password"
+# Optional: use QR login (or env CLOUD189_USE_QR=1)
+# cloud189_use_qr = false
 
 [[backups]]
 source_dir = "/srv/data/project-a"

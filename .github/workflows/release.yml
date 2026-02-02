@@ -29,17 +29,17 @@ jobs:
         run: |
           set -e
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            7z a backup-to-baidu-windows.zip target/release/backup-to-baidu.exe
+            7z a backup-to-cloud-windows.zip target/release/backup-to-cloud.exe
           else
-            zip backup-to-baidu-linux.zip target/release/backup-to-baidu
+            zip backup-to-cloud-linux.zip target/release/backup-to-cloud
           fi
       - name: Upload zipped binary
         uses: actions/upload-artifact@v6
         with:
-          name: backup-to-baidu-${{ matrix.os }}
+          name: backup-to-cloud-${{ matrix.os }}
           path: |
-            backup-to-baidu-windows.zip
-            backup-to-baidu-linux.zip
+            backup-to-cloud-windows.zip
+            backup-to-cloud-linux.zip
           retention-days: 7
         
 

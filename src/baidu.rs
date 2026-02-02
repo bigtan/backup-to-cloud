@@ -261,10 +261,10 @@ impl BaiduPanUploader {
     fn perform_authorization(&mut self) -> Result<()> {
         let auth_url = self.get_authorization_url();
         info!("Authorization required for first use or expired token");
-        info!("1. 在浏览器中打开以下链接: {}", auth_url);
-        info!("2. 登录并授权后，你将得到一个授权码 (code)。");
+        info!("1. Open the following URL in your browser: {}", auth_url);
+        info!("2. Log in and authorize, then you will get an authorization code.");
 
-        println!("3. 请将授权码粘贴到此处并按 Enter: ");
+        println!("3. Paste the authorization code here and press Enter: ");
         let mut code = String::new();
         std::io::stdin().read_line(&mut code)?;
 
@@ -274,15 +274,15 @@ impl BaiduPanUploader {
         let user_info = self.get_user_info()?;
         if user_info.errno == 0 {
             info!(
-                "授权成功！你好, {}!",
-                user_info.baidu_name.unwrap_or_else(|| "用户".to_string())
+                "Authorization successful. Hello, {}!",
+                user_info.baidu_name.unwrap_or_else(|| "user".to_string())
             );
             if let (Some(total), Some(used)) = (user_info.total, user_info.used) {
                 info!(
-                    "网盘总空间: {:.2} GB",
+                    "Total storage: {:.2} GB",
                     total as f64 / (1024_f64.powi(3))
                 );
-                info!("已用空间: {:.2} GB", used as f64 / (1024_f64.powi(3)));
+                info!("Used storage: {:.2} GB", used as f64 / (1024_f64.powi(3)));
             }
         } else {
             anyhow::bail!("Failed to get user info");

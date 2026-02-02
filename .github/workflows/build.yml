@@ -26,9 +26,9 @@ jobs:
       - name: Upload binary
         uses: actions/upload-artifact@v6
         with:
-          name: backup-to-baidu-${{ matrix.os }}
+          name: backup-to-cloud-${{ matrix.os }}
           path: |
-            target/release/backup-to-baidu.exe
-            target/release/backup-to-baidu
+            target/release/backup-to-cloud.exe
+            target/release/backup-to-cloud
           retention-days: 7
     

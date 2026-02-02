@@ -1,14 +1,41 @@
 mod baidu;
+mod cloud189;
 
 use anyhow::{Context, Result};
 use baidu::BaiduPanUploader;
 use chrono::Local;
+use cloud189::Cloud189Uploader;
 use std::env;
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tracing::info;
 use serde::Deserialize;
+
+trait Uploader {
+    fn name(&self) -> &'static str;
+    fn upload(&mut self, file_path: &str, dest_path: &str) -> Result<bool>;
+}
+
+impl Uploader for BaiduPanUploader {
+    fn name(&self) -> &'static str {
+        "Baidu Pan"
+    }
+
+    fn upload(&mut self, file_path: &str, dest_path: &str) -> Result<bool> {
+        BaiduPanUploader::upload(self, file_path, dest_path)
+    }
+}
+
+impl Uploader for Cloud189Uploader {
+    fn name(&self) -> &'static str {
+        "Cloud189"
+    }
+
+    fn upload(&mut self, file_path: &str, dest_path: &str) -> Result<bool> {
+        Cloud189Uploader::upload(self, file_path, dest_path)
+    }
+}
 
 #[derive(Debug, Deserialize)]
 struct Config {
@@ -18,9 +45,19 @@ struct Config {
 
 #[derive(Debug, Deserialize)]
 struct AppConfig {
-    app_key: String,
-    app_secret: String,
+    #[serde(default)]
+    baidu_enabled: Option<bool>,
+    #[serde(alias = "app_key")]
+    baidu_app_key: Option<String>,
+    #[serde(alias = "app_secret")]
+    baidu_app_secret: Option<String>,
     baidu_config: Option<String>,
+    #[serde(default)]
+    cloud189_enabled: Option<bool>,
+    cloud189_config: Option<String>,
+    cloud189_username: Option<String>,
+    cloud189_password: Option<String>,
+    cloud189_use_qr: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -45,10 +82,68 @@ fn main() -> Result<()> {
     }
 
     let config = load_config(&config_path)?;
-    let baidu_config = config.app.baidu_config.map(PathBuf::from);
+    let AppConfig {
+        baidu_enabled,
+        baidu_app_key,
+        baidu_app_secret,
+        baidu_config,
+        cloud189_enabled,
+        cloud189_config,
+        cloud189_username,
+        cloud189_password,
+        cloud189_use_qr,
+    } = config.app;
+    let baidu_config = baidu_config.map(PathBuf::from);
+    let cloud189_config = cloud189_config.map(PathBuf::from);
 
-    let mut uploader =
-        BaiduPanUploader::new(config.app.app_key, config.app.app_secret, baidu_config)?;
+    let baidu_enabled = baidu_enabled.unwrap_or_else(|| {
+        baidu_app_key.is_some() || baidu_app_secret.is_some()
+    });
+    let baidu_uploader = if baidu_enabled {
+        let app_key = baidu_app_key.context("Missing baidu_app_key (or app_key)")?;
+        let app_secret = baidu_app_secret.context("Missing baidu_app_secret (or app_secret)")?;
+        Some(Box::new(BaiduPanUploader::new(app_key, app_secret, baidu_config)?)
+            as Box<dyn Uploader>)
+    } else {
+        None
+    };
+
+    let cloud189_enabled = cloud189_enabled.unwrap_or_else(|| {
+        cloud189_config.is_some()
+            || cloud189_username.is_some()
+            || cloud189_password.is_some()
+            || cloud189_use_qr.is_some()
+            || env_has_value("CLOUD189_USERNAME")
+            || env_has_value("CLOUD189_PASSWORD")
+            || env_bool_enabled("CLOUD189_USE_QR")
+    });
+    let cloud189_uploader = if cloud189_enabled {
+        let (username, password, use_qr) = resolve_cloud189_credentials(
+            cloud189_username,
+            cloud189_password,
+            cloud189_use_qr,
+        );
+        Some(Box::new(Cloud189Uploader::new(
+            cloud189_config,
+            username,
+            password,
+            use_qr,
+        )?) as Box<dyn Uploader>)
+    } else {
+        None
+    };
+
+    let mut uploaders: Vec<Box<dyn Uploader>> = Vec::new();
+    if let Some(uploader) = baidu_uploader {
+        uploaders.push(uploader);
+    }
+    if let Some(uploader) = cloud189_uploader {
+        uploaders.push(uploader);
+    }
+
+    if uploaders.is_empty() {
+        anyhow::bail!("No cloud uploader enabled");
+    }
 
     for item in config.backups {
         let date = Local::now().format("%Y%m%d").to_string();
@@ -76,12 +171,15 @@ fn main() -> Result<()> {
         create_archive(&source_path, &archive_path)?;
 
         let remote_dir = expand_placeholders(&item.remote_dir, &date, base_name);
-        uploader.upload(
-            archive_path
-                .to_str()
-                .context("Archive path is not valid UTF-8")?,
-            &remote_dir,
-        )?;
+        for uploader in uploaders.iter_mut() {
+            info!("Uploading to {}", uploader.name());
+            uploader.upload(
+                archive_path
+                    .to_str()
+                    .context("Archive path is not valid UTF-8")?,
+                &remote_dir,
+            )?;
+        }
         if !item.keep_archive.unwrap_or(false) {
             fs::remove_file(&archive_path).with_context(|| {
                 format!(
@@ -114,6 +212,41 @@ fn load_config(path: &str) -> Result<Config> {
         anyhow::bail!("No backups configured");
     }
     Ok(config)
+}
+
+fn resolve_cloud189_credentials(
+    username: Option<String>,
+    password: Option<String>,
+    use_qr: Option<bool>,
+) -> (Option<String>, Option<String>, bool) {
+    let username = username.or_else(|| env::var("CLOUD189_USERNAME").ok());
+    let password = password.or_else(|| env::var("CLOUD189_PASSWORD").ok());
+    let use_qr = use_qr
+        .or_else(|| env::var("CLOUD189_USE_QR").ok().and_then(parse_env_bool))
+        .unwrap_or(false);
+    (username, password, use_qr)
+}
+
+fn env_has_value(name: &str) -> bool {
+    env::var(name)
+        .ok()
+        .map(|val| !val.trim().is_empty())
+        .unwrap_or(false)
+}
+
+fn env_bool_enabled(name: &str) -> bool {
+    env::var(name)
+        .ok()
+        .and_then(parse_env_bool)
+        .unwrap_or(false)
+}
+
+fn parse_env_bool(value: String) -> Option<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
 }
 
 fn normalize_archive_name(archive_name: &str) -> &str {
