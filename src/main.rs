@@ -1,41 +1,12 @@
-mod baidu;
-mod cloud189;
-
 use anyhow::{Context, Result};
-use baidu::BaiduPanUploader;
 use chrono::Local;
-use cloud189::Cloud189Uploader;
+use estan::uploader::{BaiduPanUploader, Cloud189Uploader, Uploader};
 use std::env;
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tracing::info;
 use serde::Deserialize;
-
-trait Uploader {
-    fn name(&self) -> &'static str;
-    fn upload(&mut self, file_path: &str, dest_path: &str) -> Result<bool>;
-}
-
-impl Uploader for BaiduPanUploader {
-    fn name(&self) -> &'static str {
-        "Baidu Pan"
-    }
-
-    fn upload(&mut self, file_path: &str, dest_path: &str) -> Result<bool> {
-        BaiduPanUploader::upload(self, file_path, dest_path)
-    }
-}
-
-impl Uploader for Cloud189Uploader {
-    fn name(&self) -> &'static str {
-        "Cloud189"
-    }
-
-    fn upload(&mut self, file_path: &str, dest_path: &str) -> Result<bool> {
-        Cloud189Uploader::upload(self, file_path, dest_path)
-    }
-}
 
 #[derive(Debug, Deserialize)]
 struct Config {
