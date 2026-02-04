@@ -23,6 +23,9 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
+          shared-key: "rust-cache-${{ runner.os }}"
+          add-job-id-key: "false"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Build
         run: cargo build --release
       - name: Run tests

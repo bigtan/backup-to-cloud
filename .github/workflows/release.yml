@@ -26,6 +26,8 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
+          shared-key: "rust-cache-${{ runner.os }}"
+          add-job-id-key: "false"
       - name: Build
         run: cargo build --release
       - name: Prepare binary archive
