@@ -1,12 +1,12 @@
 use anyhow::{Context, Result};
 use chrono::Local;
 use estan::uploader::{BaiduPanUploader, Cloud189Uploader, Uploader};
+use serde::Deserialize;
 use std::env;
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tracing::info;
-use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 struct Config {
@@ -67,14 +67,15 @@ fn main() -> Result<()> {
     let baidu_config = baidu_config.map(PathBuf::from);
     let cloud189_config = cloud189_config.map(PathBuf::from);
 
-    let baidu_enabled = baidu_enabled.unwrap_or_else(|| {
-        baidu_app_key.is_some() || baidu_app_secret.is_some()
-    });
+    let baidu_enabled =
+        baidu_enabled.unwrap_or_else(|| baidu_app_key.is_some() || baidu_app_secret.is_some());
     let baidu_uploader = if baidu_enabled {
         let app_key = baidu_app_key.context("Missing baidu_app_key (or app_key)")?;
         let app_secret = baidu_app_secret.context("Missing baidu_app_secret (or app_secret)")?;
-        Some(Box::new(BaiduPanUploader::new(app_key, app_secret, baidu_config)?)
-            as Box<dyn Uploader>)
+        Some(
+            Box::new(BaiduPanUploader::new(app_key, app_secret, baidu_config)?)
+                as Box<dyn Uploader>,
+        )
     } else {
         None
     };
@@ -89,11 +90,8 @@ fn main() -> Result<()> {
             || env_bool_enabled("CLOUD189_USE_QR")
     });
     let cloud189_uploader = if cloud189_enabled {
-        let (username, password, use_qr) = resolve_cloud189_credentials(
-            cloud189_username,
-            cloud189_password,
-            cloud189_use_qr,
-        );
+        let (username, password, use_qr) =
+            resolve_cloud189_credentials(cloud189_username, cloud189_password, cloud189_use_qr);
         Some(Box::new(Cloud189Uploader::new(
             cloud189_config,
             username,
@@ -134,7 +132,10 @@ fn main() -> Result<()> {
             anyhow::bail!("Source path not found: {}", source_path.display());
         }
         if !source_path.is_dir() && !source_path.is_file() {
-            anyhow::bail!("Source path is not a file or directory: {}", source_path.display());
+            anyhow::bail!(
+                "Source path is not a file or directory: {}",
+                source_path.display()
+            );
         }
 
         let archive_path = build_archive_path(base_name, &date)?;
@@ -159,15 +160,16 @@ fn main() -> Result<()> {
                 )
             })?;
         }
-        if item.command.is_some() && !item.keep_command_source.unwrap_or(true) {
-            if source_path.is_file() {
-                fs::remove_file(&source_path).with_context(|| {
-                    format!(
-                        "Failed to remove command output file: {}",
-                        source_path.display()
-                    )
-                })?;
-            }
+        if item.command.is_some()
+            && !item.keep_command_source.unwrap_or(true)
+            && source_path.is_file()
+        {
+            fs::remove_file(&source_path).with_context(|| {
+                format!(
+                    "Failed to remove command output file: {}",
+                    source_path.display()
+                )
+            })?;
         }
     }
 
@@ -285,8 +287,7 @@ fn run_command(command: &str, workdir: Option<&str>) -> Result<()> {
 fn create_archive(source_path: &Path, output_path: &Path) -> Result<()> {
     let file = File::create(output_path)
         .with_context(|| format!("Failed to create archive file: {}", output_path.display()))?;
-    let encoder = zstd::Encoder::new(file, 10)
-        .context("Failed to initialize zstd encoder")?;
+    let encoder = zstd::Encoder::new(file, 10).context("Failed to initialize zstd encoder")?;
     let mut builder = tar::Builder::new(encoder);
 
     let base_name = source_path
@@ -304,10 +305,15 @@ fn create_archive(source_path: &Path, output_path: &Path) -> Result<()> {
             .append_path_with_name(source_path, base_name)
             .with_context(|| format!("Failed to append file: {}", source_path.display()))?;
     } else {
-        anyhow::bail!("Source path is not a file or directory: {}", source_path.display());
+        anyhow::bail!(
+            "Source path is not a file or directory: {}",
+            source_path.display()
+        );
     }
     builder.finish().context("Failed to finish tar archive")?;
-    let encoder = builder.into_inner().context("Failed to finalize tar builder")?;
+    let encoder = builder
+        .into_inner()
+        .context("Failed to finalize tar builder")?;
     encoder.finish().context("Failed to finish zstd encoding")?;
     Ok(())
 }
