@@ -64,7 +64,7 @@ dependencies = [
 
 [[package]]
 name = "backup-to-cloud"
-version = "0.7.3"
+version = "0.7.4"
 dependencies = [
  "anyhow",
  "chrono",
@@ -375,8 +375,8 @@ dependencies = [
 
 [[package]]
 name = "estan"
-version = "0.1.1"
-source = "git+https://github.com/bigtan/estan?tag=v0.1.2#bba8b00ebe6613bb85d4a59c740ad6f6a7b679d8"
+version = "0.1.3"
+source = "git+https://github.com/bigtan/estan?tag=v0.1.3#925258c300a6082f030cc932a778747d5ae165c9"
 dependencies = [
  "aes",
  "anyhow",
