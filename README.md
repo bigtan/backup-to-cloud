@@ -48,17 +48,21 @@ archive_name = "mydb"
 keep_archive = false
 ```
 
-- `archive_name` becomes `archive_name-YYYYMMDD.tar.zst`
+- `archive_name` becomes `archive_name-YYYYMMDD.tar.zst`; if that file exists, a numeric suffix is appended
 - `keep_archive` defaults to `false`
 - `source_path` can be a file or directory; `source_dir` is kept for compatibility
 - `command` runs in the system shell (`cmd /C` on Windows, `sh -c` on Unix)
 - `command_workdir` sets the working directory for `command`
 - `keep_command_source` defaults to `true` and only applies when `command` is set
+- Command content is not logged to avoid leaking secrets in logs
 - Normal file/directory backups never modify the source data
 - `command`, `command_workdir`, `source_dir`, `source_path`, and `remote_dir` support placeholders: `{date}` and `{archive_name}`
 - Cloud189 credentials can be provided via config or env: `CLOUD189_USERNAME`, `CLOUD189_PASSWORD`, `CLOUD189_USE_QR=1`
 - `baidu_app_key` / `baidu_app_secret` also accept legacy keys `app_key` / `app_secret`
-- `baidu_enabled` / `cloud189_enabled` are optional; if omitted, they auto-enable when related config/env values are present
+- `baidu_enabled` / `cloud189_enabled` default to `false`; only enabled when explicitly set to `true`
+- When `baidu_enabled = true`, both `baidu_app_key` and `baidu_app_secret` are required
+- When `cloud189_enabled = true`, set either `cloud189_use_qr = true` or provide both username/password (config or env)
+- Backup items continue running even if one item fails; the process exits with an error summary when any failures occurred
 
 ## Run
 ```bash

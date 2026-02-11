@@ -6,7 +6,7 @@ use std::env;
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use tracing::info;
+use tracing::{error, info, warn};
 
 #[derive(Debug, Deserialize)]
 struct Config {
@@ -67,8 +67,18 @@ fn main() -> Result<()> {
     let baidu_config = baidu_config.map(PathBuf::from);
     let cloud189_config = cloud189_config.map(PathBuf::from);
 
-    let baidu_enabled =
-        baidu_enabled.unwrap_or_else(|| baidu_app_key.is_some() || baidu_app_secret.is_some());
+    let has_baidu_key = baidu_app_key
+        .as_deref()
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false);
+    let has_baidu_secret = baidu_app_secret
+        .as_deref()
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false);
+    let baidu_enabled = baidu_enabled.unwrap_or(false);
+    if baidu_enabled && !(has_baidu_key && has_baidu_secret) {
+        anyhow::bail!("Baidu uploader enabled but baidu_app_key/baidu_app_secret are incomplete");
+    }
     let baidu_uploader = if baidu_enabled {
         let app_key = baidu_app_key.context("Missing baidu_app_key (or app_key)")?;
         let app_secret = baidu_app_secret.context("Missing baidu_app_secret (or app_secret)")?;
@@ -80,18 +90,30 @@ fn main() -> Result<()> {
         None
     };
 
-    let cloud189_enabled = cloud189_enabled.unwrap_or_else(|| {
-        cloud189_config.is_some()
-            || cloud189_username.is_some()
-            || cloud189_password.is_some()
-            || cloud189_use_qr.is_some()
-            || env_has_value("CLOUD189_USERNAME")
-            || env_has_value("CLOUD189_PASSWORD")
-            || env_bool_enabled("CLOUD189_USE_QR")
-    });
+    let cloud189_enabled = cloud189_enabled.unwrap_or(false);
     let cloud189_uploader = if cloud189_enabled {
         let (username, password, use_qr) =
             resolve_cloud189_credentials(cloud189_username, cloud189_password, cloud189_use_qr);
+        let username_present = username
+            .as_deref()
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false);
+        let password_present = password
+            .as_deref()
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false);
+        if !use_qr {
+            if username_present ^ password_present {
+                anyhow::bail!(
+                    "Cloud189 uploader enabled with password login, but username/password are incomplete"
+                );
+            }
+            if !username_present && !password_present {
+                anyhow::bail!(
+                    "Cloud189 uploader enabled requires either cloud189_use_qr=true or both username/password"
+                );
+            }
+        }
         Some(Box::new(Cloud189Uploader::new(
             cloud189_config,
             username,
@@ -114,44 +136,77 @@ fn main() -> Result<()> {
         anyhow::bail!("No cloud uploader enabled");
     }
 
+    let mut failures: Vec<String> = Vec::new();
+
     for item in config.backups {
         let date = Local::now().format("%Y%m%d").to_string();
         let base_name = normalize_archive_name(&item.archive_name);
         let source_path = resolve_source_path(&item, &date, base_name)?;
         if let Some(command) = item.command.as_deref() {
             let expanded_command = expand_placeholders(command, &date, base_name);
-            info!("Running command: {}", expanded_command);
+            info!("Running command for backup item: {}", base_name);
             let workdir = item
                 .command_workdir
                 .as_deref()
                 .map(|dir| expand_placeholders(dir, &date, base_name));
-            run_command(&expanded_command, workdir.as_deref())?;
+            if let Err(err) = run_command(&expanded_command, workdir.as_deref()) {
+                let message = format!("[{base_name}] command failed: {err}");
+                error!("{}", message);
+                failures.push(message);
+                continue;
+            }
         }
 
         if !source_path.exists() {
-            anyhow::bail!("Source path not found: {}", source_path.display());
+            let message = format!("[{base_name}] source path not found: {}", source_path.display());
+            error!("{}", message);
+            failures.push(message);
+            continue;
         }
         if !source_path.is_dir() && !source_path.is_file() {
-            anyhow::bail!(
-                "Source path is not a file or directory: {}",
+            let message = format!(
+                "[{base_name}] source path is not a file or directory: {}",
                 source_path.display()
             );
+            error!("{}", message);
+            failures.push(message);
+            continue;
         }
 
         let archive_path = build_archive_path(base_name, &date)?;
         info!("Creating archive: {}", archive_path.display());
-        create_archive(&source_path, &archive_path)?;
+        if let Err(err) = create_archive(&source_path, &archive_path) {
+            let message = format!("[{base_name}] create archive failed: {err}");
+            error!("{}", message);
+            failures.push(message);
+            continue;
+        }
 
         let remote_dir = expand_placeholders(&item.remote_dir, &date, base_name);
+        let mut upload_failed = false;
         for uploader in uploaders.iter_mut() {
             info!("Uploading to {}", uploader.name());
-            uploader.upload(
+            if let Err(err) = uploader.upload(
                 archive_path
                     .to_str()
                     .context("Archive path is not valid UTF-8")?,
                 &remote_dir,
-            )?;
+            ) {
+                upload_failed = true;
+                let message = format!("[{base_name}] upload failed on {}: {}", uploader.name(), err);
+                error!("{}", message);
+                failures.push(message);
+            }
         }
+
+        if upload_failed {
+            warn!(
+                "Archive retained because one or more uploads failed: {}",
+                archive_path.display()
+            );
+            continue;
+        }
+
         if !item.keep_archive.unwrap_or(false) {
             fs::remove_file(&archive_path).with_context(|| {
                 format!(
@@ -171,6 +226,14 @@ fn main() -> Result<()> {
                 )
             })?;
         }
+    }
+
+    if !failures.is_empty() {
+        anyhow::bail!(
+            "Backup finished with {} failure(s):\n{}",
+            failures.len(),
+            failures.join("\n")
+        );
     }
 
     info!("Backup uploaded successfully");
@@ -200,20 +263,6 @@ fn resolve_cloud189_credentials(
     (username, password, use_qr)
 }
 
-fn env_has_value(name: &str) -> bool {
-    env::var(name)
-        .ok()
-        .map(|val| !val.trim().is_empty())
-        .unwrap_or(false)
-}
-
-fn env_bool_enabled(name: &str) -> bool {
-    env::var(name)
-        .ok()
-        .and_then(parse_env_bool)
-        .unwrap_or(false)
-}
-
 fn parse_env_bool(value: String) -> Option<bool> {
     match value.trim().to_ascii_lowercase().as_str() {
         "1" | "true" | "yes" | "on" => Some(true),
@@ -238,7 +287,19 @@ fn expand_placeholders(input: &str, date: &str, archive_name: &str) -> String {
 
 fn build_archive_path(archive_name: &str, date: &str) -> Result<PathBuf> {
     let file_name = format!("{archive_name}-{date}.tar.zst");
-    let output_path = env::current_dir()?.join(file_name);
+    let cwd = env::current_dir()?;
+    let mut output_path = cwd.join(&file_name);
+    if output_path.exists() {
+        let mut counter = 1usize;
+        loop {
+            let candidate = cwd.join(format!("{archive_name}-{date}-{counter}.tar.zst"));
+            if !candidate.exists() {
+                output_path = candidate;
+                break;
+            }
+            counter += 1;
+        }
+    }
     Ok(output_path)
 }
 
@@ -316,4 +377,28 @@ fn create_archive(source_path: &Path, output_path: &Path) -> Result<()> {
         .context("Failed to finalize tar builder")?;
     encoder.finish().context("Failed to finish zstd encoding")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_expand_placeholders() {
+        let result = expand_placeholders("/a/{archive_name}/{date}", "20260211", "demo");
+        assert_eq!(result, "/a/demo/20260211");
+    }
+
+    #[test]
+    fn test_parse_env_bool() {
+        assert_eq!(parse_env_bool("1".to_string()), Some(true));
+        assert_eq!(parse_env_bool("off".to_string()), Some(false));
+        assert_eq!(parse_env_bool("invalid".to_string()), None);
+    }
+
+    #[test]
+    fn test_normalize_archive_name() {
+        assert_eq!(normalize_archive_name("  "), "backup");
+        assert_eq!(normalize_archive_name(" project-a "), "project-a");
+    }
 }
