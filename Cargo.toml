@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
-estan = { git = "https://github.com/bigtan/estan", tag = "v0.1.4", features = ["uploader-baidu", "uploader-cloud189"] }
+estan = { git = "https://github.com/bigtan/estan", tag = "v0.1.5", features = ["uploader-baidu", "uploader-cloud189"] }
 serde = { version = "1.0", features = ["derive"] }
 tar = "0.4"
 toml = "1.0"
