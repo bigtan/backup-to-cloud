@@ -19,6 +19,21 @@ backup targets defined in a TOML config file.
 cargo build --release
 ```
 
+## Dependency Override
+
+This project keeps `estan` pinned to a Git tag in `Cargo.toml`, and also uses a local patch override:
+
+```toml
+estan = { git = "https://github.com/bigtan/estan", tag = "v0.1.7", features = [...] }
+
+[patch."https://github.com/bigtan/estan"]
+estan = { path = "../estan" }
+```
+
+- Daily local development uses the sibling [estan](/D:/WorkPlace/Rust/estan) checkout automatically
+- Removing the `[patch]` section switches the dependency back to the published Git tag
+- This keeps release intent explicit while still allowing local联调 and fast testing
+
 ## Configuration
 Create `backup.toml` (see `backup.example.toml`):
 ```toml

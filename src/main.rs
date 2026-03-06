@@ -158,7 +158,10 @@ fn main() -> Result<()> {
         }
 
         if !source_path.exists() {
-            let message = format!("[{base_name}] source path not found: {}", source_path.display());
+            let message = format!(
+                "[{base_name}] source path not found: {}",
+                source_path.display()
+            );
             error!("{}", message);
             failures.push(message);
             continue;
@@ -193,7 +196,11 @@ fn main() -> Result<()> {
                 &remote_dir,
             ) {
                 upload_failed = true;
-                let message = format!("[{base_name}] upload failed on {}: {}", uploader.name(), err);
+                let message = format!(
+                    "[{base_name}] upload failed on {}: {}",
+                    uploader.name(),
+                    err
+                );
                 error!("{}", message);
                 failures.push(message);
             }

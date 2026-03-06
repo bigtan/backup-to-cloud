@@ -414,8 +414,8 @@ dependencies = [
 
 [[package]]
 name = "estan"
-version = "0.1.7"
-source = "git+https://github.com/bigtan/estan?tag=v0.1.7#45551095f2fc2b988eeec5f3662280aa04327a9a"
+version = "0.1.8"
+source = "git+https://github.com/bigtan/estan?tag=v0.1.8#868620533a008cf1218d154c4c4249787903dbc9"
 dependencies = [
  "aes",
  "anyhow",
