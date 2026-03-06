@@ -24,7 +24,7 @@ jobs:
       - name: Run tests
         run: cargo test --release
       - name: Upload binary
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: backup-to-cloud-${{ matrix.os }}
           path: |

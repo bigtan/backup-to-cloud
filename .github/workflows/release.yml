@@ -34,7 +34,7 @@ jobs:
             zip backup-to-cloud-linux.zip target/release/backup-to-cloud
           fi
       - name: Upload zipped binary
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: backup-to-cloud-${{ matrix.os }}
           path: |
